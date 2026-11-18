@@ -1,0 +1,7 @@
+[submodule "SubSystems/FocalEngine"]
+	path = SubSystems/FocalEngine
+	url = https://github.com/Azzinoth/FocalEngine
+	branch = master
+[submodule "ThirdParty/curl"]
+	path = ThirdParty/curl
+	url = https://github.com/curl/curl

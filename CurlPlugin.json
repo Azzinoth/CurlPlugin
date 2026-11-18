@@ -1,0 +1,19 @@
+{
+	"ID": "e70bc211-9ca4-4884-915b-00e455f437d1",
+	"Name": "CurlPlugin",
+	"Version": "1.0.0",
+	"Description": "HTTP and HTTPS requests, file downloads and multipart uploads using libcurl 8.23.0.",
+	"SupportedOS": [ "Windows" ],
+	"Dependencies": [],
+	"Modules": [
+		{
+			"ID": "d844b3e6-cf87-4aeb-b971-53a8585d0a8a",
+			"Type": "Engine",
+			"Name": "CurlPlugin",
+			"EntryPointFileName": "CurlPlugin.dll",
+			"SupportedOS": [ "Windows" ],
+			"SupportedGraphicsModes": [ "OnScreen", "Offscreen", "None" ],
+			"Dependencies": []
+		}
+	]
+}
