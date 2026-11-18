@@ -32,6 +32,7 @@ cmake_install.cmake
 /EngineBuild/
 /EngineLibs/
 /CurlBuild/
+/CurlBuildStaticRuntime/
 *.dir/
 .vs/
 CMakeFiles/

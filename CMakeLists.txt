@@ -109,28 +109,37 @@ endif()
 # Only what Windows has is used: Schannel for TLS, so certificates come from Windows certificate store and no CA bundle is needed.
 # Optional dependencies are turned off, otherwise curl would use whatever it finds on the machine.
 # It is added before include_directories of engine, so curl sources do not see engine headers.
-set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-set(BUILD_STATIC_LIBS ON CACHE BOOL "" FORCE)
-set(BUILD_CURL_EXE OFF CACHE BOOL "" FORCE)
-set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
-set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(BUILD_LIBCURL_DOCS OFF CACHE BOOL "" FORCE)
-set(BUILD_MISC_DOCS OFF CACHE BOOL "" FORCE)
-set(ENABLE_CURL_MANUAL OFF CACHE BOOL "" FORCE)
-set(CURL_DISABLE_INSTALL ON CACHE BOOL "" FORCE)
-set(CURL_ENABLE_EXPORT_TARGET OFF CACHE BOOL "" FORCE)
-# Plugin defines UNICODE for everything, curl should know about it.
-set(ENABLE_UNICODE ON CACHE BOOL "" FORCE)
-set(CURL_USE_SCHANNEL ON CACHE BOOL "" FORCE)
-set(CURL_USE_OPENSSL OFF CACHE BOOL "" FORCE)
-set(CURL_USE_LIBPSL OFF CACHE BOOL "" FORCE)
-set(CURL_USE_LIBSSH2 OFF CACHE BOOL "" FORCE)
-set(USE_LIBIDN2 OFF CACHE BOOL "" FORCE)
-set(USE_NGHTTP2 OFF CACHE BOOL "" FORCE)
-set(CURL_ZLIB OFF CACHE STRING "" FORCE)
-set(CURL_BROTLI OFF CACHE STRING "" FORCE)
-set(CURL_ZSTD OFF CACHE STRING "" FORCE)
-set(CURL_DISABLE_LDAP ON CACHE BOOL "" FORCE)
+set(CURL_OPTIONS
+    BUILD_SHARED_LIBS=OFF
+    BUILD_STATIC_LIBS=ON
+    BUILD_CURL_EXE=OFF
+    BUILD_TESTING=OFF
+    BUILD_EXAMPLES=OFF
+    BUILD_LIBCURL_DOCS=OFF
+    BUILD_MISC_DOCS=OFF
+    ENABLE_CURL_MANUAL=OFF
+    CURL_DISABLE_INSTALL=ON
+    CURL_ENABLE_EXPORT_TARGET=OFF
+    # Plugin defines UNICODE for everything, curl should know about it.
+    ENABLE_UNICODE=ON
+    CURL_USE_SCHANNEL=ON
+    CURL_USE_OPENSSL=OFF
+    CURL_USE_LIBPSL=OFF
+    CURL_USE_LIBSSH2=OFF
+    USE_LIBIDN2=OFF
+    USE_NGHTTP2=OFF
+    CURL_ZLIB=OFF
+    CURL_BROTLI=OFF
+    CURL_ZSTD=OFF
+    CURL_DISABLE_LDAP=ON
+)
+
+foreach(Option ${CURL_OPTIONS})
+    string(REPLACE "=" ";" OptionParts "${Option}")
+    list(GET OptionParts 0 OptionName)
+    list(GET OptionParts 1 OptionValue)
+    set(${OptionName} ${OptionValue} CACHE STRING "" FORCE)
+endforeach()
 
 if(MSVC)
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /MP")
@@ -139,6 +148,26 @@ endif()
 # Plugin is configured in its source folder, without separate build folder curl build files would be written into the submodule.
 add_subdirectory(ThirdParty/curl "${CMAKE_CURRENT_SOURCE_DIR}/CurlBuild" EXCLUDE_FROM_ALL)
 set_target_properties(libcurl_static PROPERTIES FOLDER "ThirdParty")
+
+# Games and applications that link engine statically use static runtime, so static library of plugin needs curl built with static runtime too.
+# curl can not be added to this project twice, so second build is a separate CMake project with the same options.
+include(ExternalProject)
+set(CURL_STATIC_RUNTIME_ARGUMENTS ${CURL_OPTIONS})
+list(TRANSFORM CURL_STATIC_RUNTIME_ARGUMENTS PREPEND "-D")
+set(CURL_STATIC_RUNTIME_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/CurlBuildStaticRuntime")
+ExternalProject_Add(CurlStaticRuntime
+    SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/curl"
+    PREFIX "${CURL_STATIC_RUNTIME_DIRECTORY}"
+    BINARY_DIR "${CURL_STATIC_RUNTIME_DIRECTORY}/Build"
+    CMAKE_ARGS ${CURL_STATIC_RUNTIME_ARGUMENTS} -DCURL_STATIC_CRT=ON -DCMAKE_C_FLAGS_INIT=/MP
+    BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> --config $<CONFIG> --target libcurl_static
+    INSTALL_COMMAND ""
+    # Build is checked every time, so curl is rebuilt after submodule update.
+    BUILD_ALWAYS ON
+    EXCLUDE_FROM_ALL ON
+)
+set_target_properties(CurlStaticRuntime PROPERTIES FOLDER "ThirdParty")
+set(CURL_STATIC_RUNTIME_LIBRARY "${CURL_STATIC_RUNTIME_DIRECTORY}/Build/lib/$<IF:$<CONFIG:Debug>,Debug/libcurl-d.lib,Release/libcurl.lib>")
 
 file(GLOB Connection_To_Engine_SRC
 	"SubSystems/FocalEngine/SubSystems/PluginSystem/FEPluginConnector.cpp"
@@ -297,10 +326,22 @@ endfunction()
 
 # Plugin without main module gets all its modules from AdditionalModules.cmake.
 if(Main_SRC)
-    # FE_FIX_ME: Static library for games is not built yet, it would need libcurl built with static runtime too.
-    fe_add_plugin_module(${PROJECT_NAME} SOURCES ${Main_SRC})
+    fe_add_plugin_module(${PROJECT_NAME} STATIC_LIBRARY SOURCES ${Main_SRC})
     # CURL::libcurl_static also brings CURL_STATICLIB definition, curl include directory and Windows libraries that curl needs.
     target_link_libraries(${PROJECT_NAME} PRIVATE CURL::libcurl_static)
+
+    # Static library does not link anything, so it gets definition and include directory explicitly.
+    target_compile_definitions(${PROJECT_NAME}_Static PRIVATE CURL_STATICLIB)
+    target_include_directories(${PROJECT_NAME}_Static PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/curl/include")
+    # Librarian merges curl into static library of plugin, so Debug and Release libraries of plugin have curl with matching runtime
+    # and applications link only one library.
+    add_dependencies(${PROJECT_NAME}_Static CurlStaticRuntime)
+    set_target_properties(${PROJECT_NAME}_Static PROPERTIES STATIC_LIBRARY_OPTIONS "${CURL_STATIC_RUNTIME_LIBRARY}")
+
+    # DLLs and static libraries of plugin contain curl, its license requires copyright notice to be shipped with them.
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/curl/COPYING" "${CMAKE_CURRENT_SOURCE_DIR}/Build/curl_License.txt"
+    )
 
     # set the startup project
     set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${PROJECT_NAME})
@@ -310,4 +351,5 @@ endif()
 include(${CMAKE_CURRENT_SOURCE_DIR}/AdditionalModules.cmake OPTIONAL)
 
 # After all modules are added.
-fe_write_static_link_file()
+# Windows libraries that curl uses, plugin DLL gets them from CURL::libcurl_static.
+fe_write_static_link_file(LIBRARIES ws2_32 iphlpapi bcrypt advapi32 crypt32 secur32)
